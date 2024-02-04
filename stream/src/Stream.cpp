@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2019-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -28,7 +28,7 @@
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  * Changes from Qualcomm Innovation Center are provided under the following license:
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted (subject to the limitations in the
@@ -149,6 +149,15 @@ Stream* Stream::create(struct pal_stream_attributes *sAttr, struct pal_device *d
                 dAttr[i].id = PAL_DEVICE_IN_ULTRASOUND_MIC;
             }
         }
+        if(noOfDevices > 1 && (dAttr[i].id == PAL_DEVICE_OUT_SPEAKER ||
+                                dAttr[i].id == PAL_DEVICE_OUT_WIRED_HEADSET ||
+                                dAttr[i].id == PAL_DEVICE_OUT_WIRED_HEADPHONE)) {
+           PAL_DBG(LOG_TAG, "isComboHeadsetActive true");
+           sAttr->isComboHeadsetActive = true;
+        } else {
+           PAL_DBG(LOG_TAG, "isComboHeadsetActive false");
+           sAttr->isComboHeadsetActive = false;
+        }
 
         //TODO: shift this to rm or somewhere else where we can read the supported config from xml
         palDevsAttr[count].id = dAttr[i].id;
@@ -191,96 +200,105 @@ Stream* Stream::create(struct pal_stream_attributes *sAttr, struct pal_device *d
 stream_create:
     PAL_DBG(LOG_TAG, "stream type 0x%x", sAttr->type);
     if (rm->isStreamSupported(sAttr, palDevsAttr, noOfDevices)) {
-        switch (sAttr->type) {
-            case PAL_STREAM_LOW_LATENCY:
-            case PAL_STREAM_DEEP_BUFFER:
-            case PAL_STREAM_GENERIC:
-            case PAL_STREAM_VOIP_TX:
-            case PAL_STREAM_VOIP_RX:
-            case PAL_STREAM_PCM_OFFLOAD:
-            case PAL_STREAM_VOICE_CALL:
-            case PAL_STREAM_LOOPBACK:
-            case PAL_STREAM_ULTRA_LOW_LATENCY:
-            case PAL_STREAM_PROXY:
-            case PAL_STREAM_HAPTICS:
-            case PAL_STREAM_RAW:
-            case PAL_STREAM_VOICE_RECOGNITION:
-                //TODO:for now keeping PAL_STREAM_PLAYBACK_GENERIC for ULLA need to check
-                stream = new StreamPCM(sAttr,
-                                       palDevsAttr,
-                                       noOfDevices,
-                                       modifiers,
-                                       noOfModifiers,
-                                       rm);
-                break;
-            case PAL_STREAM_COMPRESSED:
-                stream = new StreamCompress(sAttr,
-                                            palDevsAttr,
-                                            noOfDevices,
-                                            modifiers,
-                                            noOfModifiers,
-                                            rm);
-                break;
-            case PAL_STREAM_VOICE_UI:
-                stream = new StreamSoundTrigger(sAttr,
+        try {
+            switch (sAttr->type) {
+                case PAL_STREAM_LOW_LATENCY:
+                case PAL_STREAM_DEEP_BUFFER:
+                case PAL_STREAM_GENERIC:
+                case PAL_STREAM_VOIP_TX:
+                case PAL_STREAM_VOIP_RX:
+                case PAL_STREAM_PCM_OFFLOAD:
+                case PAL_STREAM_VOICE_CALL:
+                case PAL_STREAM_LOOPBACK:
+                case PAL_STREAM_ULTRA_LOW_LATENCY:
+                case PAL_STREAM_PROXY:
+                case PAL_STREAM_HAPTICS:
+                case PAL_STREAM_RAW:
+                case PAL_STREAM_VOICE_RECOGNITION:
+                    //TODO:for now keeping PAL_STREAM_PLAYBACK_GENERIC for ULLA need to check
+                    stream = new StreamPCM(sAttr,
+                                           palDevsAttr,
+                                           noOfDevices,
+                                           modifiers,
+                                           noOfModifiers,
+                                           rm);
+                    break;
+                case PAL_STREAM_COMPRESSED:
+                    stream = new StreamCompress(sAttr,
                                                 palDevsAttr,
                                                 noOfDevices,
                                                 modifiers,
                                                 noOfModifiers,
                                                 rm);
-                break;
-            case PAL_STREAM_VOICE_CALL_RECORD:
-            case PAL_STREAM_VOICE_CALL_MUSIC:
-                stream = new StreamInCall(sAttr,
-                                          palDevsAttr,
-                                          noOfDevices,
-                                          modifiers,
-                                          noOfModifiers,
-                                          rm);
-                break;
-            case PAL_STREAM_NON_TUNNEL:
-                stream = new StreamNonTunnel(sAttr,
-                                             NULL,
-                                             0,
-                                             modifiers,
-                                             noOfModifiers,
-                                             rm);
-                break;
-            case PAL_STREAM_ACD:
-                stream = new StreamACD(sAttr,
-                                       palDevsAttr,
-                                       noOfDevices,
-                                       modifiers,
-                                       noOfModifiers,
-                                       rm);
-                break;
-            case PAL_STREAM_CONTEXT_PROXY:
-                stream = new StreamContextProxy(sAttr,
-                                                NULL,
-                                                0,
-                                                modifiers,
-                                                noOfModifiers,
-                                                rm);
-                break;
-            case PAL_STREAM_ULTRASOUND:
-                stream = new StreamUltraSound(sAttr,
+                    break;
+                case PAL_STREAM_VOICE_UI:
+                    stream = new StreamSoundTrigger(sAttr,
+                                                    palDevsAttr,
+                                                    noOfDevices,
+                                                    modifiers,
+                                                    noOfModifiers,
+                                                    rm);
+                    break;
+                case PAL_STREAM_VOICE_CALL_RECORD:
+                case PAL_STREAM_VOICE_CALL_MUSIC:
+                    stream = new StreamInCall(sAttr,
                                               palDevsAttr,
                                               noOfDevices,
                                               modifiers,
                                               noOfModifiers,
                                               rm);
-                break;
-            case PAL_STREAM_SENSOR_PCM_DATA:
-                stream = new StreamSensorPCMData(sAttr,
-                                                 palDevsAttr,
-                                                 noOfDevices,
+                    break;
+                case PAL_STREAM_NON_TUNNEL:
+                    stream = new StreamNonTunnel(sAttr,
+                                                 NULL,
+                                                 0,
                                                  modifiers,
                                                  noOfModifiers,
                                                  rm);
-                break;
-            default:
-                PAL_ERR(LOG_TAG, "unsupported stream type 0x%x", sAttr->type);
-                break;
+                    break;
+                case PAL_STREAM_ACD:
+                    stream = new StreamACD(sAttr,
+                                           palDevsAttr,
+                                           noOfDevices,
+                                           modifiers,
+                                           noOfModifiers,
+                                           rm);
+                    break;
+                case PAL_STREAM_CONTEXT_PROXY:
+                    stream = new StreamContextProxy(sAttr,
+                                                    NULL,
+                                                    0,
+                                                    modifiers,
+                                                    noOfModifiers,
+                                                    rm);
+                    break;
+                case PAL_STREAM_ULTRASOUND:
+                    stream = new StreamUltraSound(sAttr,
+                                                  palDevsAttr,
+                                                  noOfDevices,
+                                                  modifiers,
+                                                  noOfModifiers,
+                                                  rm);
+                    break;
+                case PAL_STREAM_SENSOR_PCM_DATA:
+                    stream = new StreamSensorPCMData(sAttr,
+                                                     palDevsAttr,
+                                                     noOfDevices,
+                                                     modifiers,
+                                                     noOfModifiers,
+                                                     rm);
+                    break;
+                default:
+                    PAL_ERR(LOG_TAG, "unsupported stream type 0x%x", sAttr->type);
+                    break;
+            }
+        }
+        catch (const std::exception& e) {
+            PAL_ERR(LOG_TAG, "Stream create failed for stream type 0x%x", sAttr->type);
+            if (palDevsAttr) {
+                free(palDevsAttr);
+            }
+            throw std::runtime_error(e.what());
         }
     } else {
         PAL_ERR(LOG_TAG,"Requested config not supported");
@@ -502,17 +520,26 @@ int32_t Stream::getAssociatedDevices(std::vector <std::shared_ptr<Device>> &aDev
     return status;
 }
 
-int32_t Stream::updatePalDevice(struct pal_device *dattr, pal_device_id_t dev_id, bool replace)
+void Stream::clearOutPalDevices()
+{
+    std::vector <struct pal_device>::iterator dIter;
+
+    for (dIter = mPalDevice.begin(); dIter != mPalDevice.end();) {
+        if (!rm->isInputDevId((*dIter).id)) {
+            mPalDevice.erase(dIter);
+        } else {
+            dIter++;
+        }
+    }
+}
+
+int32_t Stream::updatePalDevice(struct pal_device *dattr, pal_device_id_t dev_id)
 {
     int32_t status = 0;
 
     PAL_DBG(LOG_TAG, "updatePalDevice from %d to %d", dev_id, dattr->id);
     for (int i = 0; i < mPalDevice.size(); i++) {
         if (dev_id == mPalDevice[i].id) {
-            if (!replace) {
-                PAL_DBG(LOG_TAG, "found existing dattr, don't replace");
-                return status;
-            }
             mPalDevice.erase(mPalDevice.begin() + i);
             break;
         }
@@ -779,7 +806,9 @@ int32_t Stream::getTimestamp(struct pal_session_time *stime)
         PAL_ERR(LOG_TAG, "Sound card offline, status %d", status);
         goto exit;
     }
+    rm->lockResourceManagerMutex();
     status = session->getTimestamp(stime);
+    rm->unlockResourceManagerMutex();
     if (0 != status) {
         PAL_ERR(LOG_TAG, "Failed to get session timestamp status %d", status);
         if (errno == -ENETRESET &&
@@ -963,10 +992,12 @@ int32_t Stream::handleBTDeviceNotReady(bool& a2dpSuspend)
                 goto exit;
             }
 
+            mDevices.push_back(dev);
             status = session->setupSessionDevice(this, mStreamAttr->type, dev);
             if (0 != status) {
                 PAL_ERR(LOG_TAG, "setupSessionDevice failed:%d", status);
                 dev->close();
+                mDevices.pop_back();
                 goto exit;
             }
 
@@ -974,9 +1005,9 @@ int32_t Stream::handleBTDeviceNotReady(bool& a2dpSuspend)
             if (0 != status) {
                 PAL_ERR(LOG_TAG, "connectSessionDevice failed:%d", status);
                 dev->close();
+                mDevices.pop_back();
                 goto exit;
             }
-            mDevices.push_back(dev);
             dev->getDeviceAttributes(&dattr);
             updatePalDevice(&dattr, dattr.id);
         }
@@ -1013,7 +1044,7 @@ int32_t Stream::disconnectStreamDevice_l(Stream* streamHandle, pal_device_id_t d
         if (dev_id == mDevices[i]->getSndDeviceId()) {
             PAL_DBG(LOG_TAG, "device %d name %s, going to stop",
                 mDevices[i]->getSndDeviceId(), mDevices[i]->getPALDeviceName().c_str());
-            if (currentState != STREAM_STOPPED && rm->isDeviceActive_l(mDevices[i], this)) {
+            if (currentState != STREAM_STOPPED) {
                 rm->deregisterDevice(mDevices[i], this);
             }
             rm->lockGraph();
@@ -1140,7 +1171,7 @@ int32_t Stream::connectStreamDevice_l(Stream* streamHandle, struct pal_device *d
         goto dev_stop;
     }
     rm->unlockGraph();
-    if (currentState != STREAM_STOPPED && !rm->isDeviceActive_l(dev, this)) {
+    if (currentState != STREAM_STOPPED) {
         rm->registerDevice(dev, this);
     }
     goto exit;
@@ -1154,7 +1185,6 @@ dev_close:
      */
     if (status != -ENETRESET) {
         mDevices.pop_back();
-        mPalDevice.pop_back();
     }
     dev->close();
 
@@ -1253,6 +1283,8 @@ int32_t Stream::switchDevice(Stream* streamHandle, uint32_t numDev, struct pal_d
     bool has_out_device = false, has_in_device = false;
     std::vector <struct pal_device>::iterator dIter;
     struct pal_volume_data *volume = NULL;
+    pal_device_id_t newBtDevId;
+    bool isBtReady = false;
 
     rm->lockActiveStream();
     mStreamMutex.lock();
@@ -1326,6 +1358,12 @@ int32_t Stream::switchDevice(Stream* streamHandle, uint32_t numDev, struct pal_d
 
     for (int i = 0; i < numDev; i++) {
         struct pal_device_info devinfo = {};
+        bool devReadyStatus = 0;
+        uint32_t retryCnt = 20;
+        uint32_t retryPeriodMs = 100;
+        pal_param_bta2dp_t* param_bt_a2dp = nullptr;
+        std::shared_ptr<Device> dev = nullptr;
+
         /*
          * When A2DP, Out Proxy and DP device is disconnected the
          * music playback is paused and the policy manager sends routing=0
@@ -1349,8 +1387,49 @@ int32_t Stream::switchDevice(Stream* streamHandle, uint32_t numDev, struct pal_d
             rm->unlockActiveStream();
             return 0;
         }
+        /* Retry isDeviceReady check is required for BT devices only.
+        *  In case of BT disconnection event from BT stack, if stream
+        *  is still associated with BT but the BT device is not in
+        *  ready state, explicit dev switch from APM to BT keep on retrying
+        *  for 2 secs causing audioserver to stuck for processing
+        *  disconnection. Thus check for isCurDeviceA2dp and a2dp_suspended
+        *  state to avoid unnecessary sleep over 2 secs.
+        *
+        *  Also check for combo devices for the stream and do not retry for
+        *  combo streams. This will ensure seamless playback over Speaker
+        *  even if BT device is not ready.
+        */
+        if (newDevices[i].id == PAL_DEVICE_OUT_BLUETOOTH_A2DP) {
+            isNewDeviceA2dp = true;
+            newBtDevId = newDevices[i].id;
+            dev = Device::getInstance(&newDevices[i], rm);
+            if (!dev) {
+                status = -ENODEV;
+                PAL_ERR(LOG_TAG, "failed to get a2dp device object");
+                goto done;
+            }
+            dev->getDeviceParameter(PAL_PARAM_ID_BT_A2DP_SUSPENDED,
+                (void**)&param_bt_a2dp);
 
-        if (!rm->isDeviceReady(newDevices[i].id)) {
+            if (!param_bt_a2dp->a2dp_suspended) {
+                while (!devReadyStatus && --retryCnt) {
+                    devReadyStatus = rm->isDeviceReady(newDevices[i].id);
+                    if (devReadyStatus) {
+                        isBtReady = true;
+                        break;
+                    } else if (isCurDeviceA2dp) {
+                        break;
+                    } else if (rm->isDeviceAvailable(newDevices, numDev, PAL_DEVICE_OUT_SPEAKER)) {
+                        break;
+                    }
+                    usleep(retryPeriodMs * 1000);
+                }
+            }
+        } else {
+            devReadyStatus = rm->isDeviceReady(newDevices[i].id);
+        }
+
+        if (!devReadyStatus) {
             PAL_ERR(LOG_TAG, "Device %d is not ready", newDevices[i].id);
             if ((newDevices[i].id == PAL_DEVICE_OUT_BLUETOOTH_A2DP) &&
                 !(rm->isDeviceAvailable(newDevices, numDev, PAL_DEVICE_OUT_SPEAKER))) {
@@ -1364,9 +1443,6 @@ int32_t Stream::switchDevice(Stream* streamHandle, uint32_t numDev, struct pal_d
         } else {
             newDeviceSlots[connectCount] = i;
             connectCount++;
-
-            if (newDevices[i].id == PAL_DEVICE_OUT_BLUETOOTH_A2DP)
-                isNewDeviceA2dp = true;
         }
 
         /* store or update palDev before newDevices can be changed */
@@ -1401,7 +1477,16 @@ int32_t Stream::switchDevice(Stream* streamHandle, uint32_t numDev, struct pal_d
         rm->getDeviceInfo((pal_device_id_t)newDeviceId,
                           type,newDevices[newDeviceSlots[i]].custom_config.custom_key,
                           &deviceInfo);
-
+        PAL_DBG(LOG_TAG,"newDeviceId %d connectCount:%d ",newDeviceId,connectCount);
+        if(connectCount > 1 && (newDeviceId == PAL_DEVICE_OUT_SPEAKER ||
+                                newDeviceId == PAL_DEVICE_OUT_WIRED_HEADSET ||
+                                newDeviceId == PAL_DEVICE_OUT_WIRED_HEADPHONE)) {
+           PAL_DBG(LOG_TAG, "isComboHeadsetActive true");
+           strAttr.isComboHeadsetActive = true;
+        } else {
+           PAL_DBG(LOG_TAG, "isComboHeadsetActive false");
+           strAttr.isComboHeadsetActive = false;
+        }
         /* This can result in below situation:
          * 1) No matching SharedBEStreamDev (handled in else part).
          *    e.g. - case 1a, 2.
@@ -1456,7 +1541,8 @@ int32_t Stream::switchDevice(Stream* streamHandle, uint32_t numDev, struct pal_d
                     strAttr.type != PAL_STREAM_VOIP_TX &&
                     strAttr.type != PAL_STREAM_VOIP &&
                     curDevAttr.id != newDevices[newDeviceSlots[i]].id) {
-                    newDevices[newDeviceSlots[i]].id = curDevAttr.id;
+                    ar_mem_cpy(&(newDevices[newDeviceSlots[i]]), sizeof(struct pal_device),
+                               &curDevAttr, sizeof(struct pal_device));
                     rm->getSndDeviceName(newDevices[newDeviceSlots[i]].id, CurrentSndDeviceName);
                     rm->updatePriorityAttr(newDevices[newDeviceSlots[i]].id,
                                        sharedBEStreamDev,
@@ -1513,6 +1599,17 @@ int32_t Stream::switchDevice(Stream* streamHandle, uint32_t numDev, struct pal_d
             }
             streamsToSwitch.clear();
 
+            if (!rm->is_multiple_sample_rate_combo_supported) {
+            // check if headset config needs to update when speaker is active
+                rm->checkSpeakerConcurrency(&newDevices[newDeviceSlots[i]], &strAttr, streamsToSwitch/* not used */, &streamDevAttr);
+                if (!streamsToSwitch.empty()) {
+                     for(sIter = streamsToSwitch.begin(); sIter != streamsToSwitch.end(); sIter++) {
+                         streamDevDisconnect.push_back({(*sIter), streamDevAttr.id});
+                         StreamDevConnect.push_back({(*sIter), &streamDevAttr});
+                     }
+                }
+            }
+
             // check if headset config needs to update when haptics is active
             rm->checkHapticsConcurrency(&newDevices[newDeviceSlots[i]], NULL, streamsToSwitch/* not used */, NULL);
         }
@@ -1553,7 +1650,7 @@ int32_t Stream::switchDevice(Stream* streamHandle, uint32_t numDev, struct pal_d
         /* Add device associated with current stream to streamDevDisconnect/StreamDevConnect list */
         for (int j = 0; j < disconnectCount; j++) {
             // check to make sure device direction is the same
-            if (rm->matchDevDir(mDevices[curDeviceSlots[j]]->getSndDeviceId(), newDeviceId)) {
+            if ((mDevices[curDeviceSlots[j]] != NULL) &&  rm->matchDevDir(mDevices[curDeviceSlots[j]]->getSndDeviceId(), newDeviceId)) {
                 streamDevDisconnect.push_back({streamHandle, mDevices[curDeviceSlots[j]]->getSndDeviceId()});
                 // if something disconnected incoming device and current dev diff so push on a switchwe need to add the deivce
                 matchFound = true;
@@ -1612,7 +1709,7 @@ int32_t Stream::switchDevice(Stream* streamHandle, uint32_t numDev, struct pal_d
 
 done:
     mStreamMutex.lock();
-    if (a2dpMuted && !isNewDeviceA2dp) {
+    if (a2dpMuted) {
         volume = (struct pal_volume_data *)calloc(1, (sizeof(uint32_t) +
                               (sizeof(struct pal_channel_vol_kv) * (0xFFFF))));
         if (!volume) {
@@ -1634,6 +1731,12 @@ done:
         if (volume) {
             free(volume);
         }
+    }
+    if ((numDev > 1) && isNewDeviceA2dp && !isBtReady) {
+        suspendedDevIds.clear();
+        suspendedDevIds.push_back(newBtDevId);
+        suspendedDevIds.push_back(PAL_DEVICE_OUT_SPEAKER);
+    } else {
         suspendedDevIds.clear();
     }
     mStreamMutex.unlock();
@@ -1711,5 +1814,13 @@ void Stream::handleStreamException(struct pal_stream_attributes *attributes,
          cb(NULL, PAL_STREAM_CBK_EVENT_ERROR, 0, 0, cookie);
 
     }
+}
+
+void Stream::setCachedState(stream_state_t state)
+{
+    mStreamMutex.lock();
+    cachedState = state;
+    PAL_DBG(LOG_TAG, "set cachedState to %d", cachedState);
+    mStreamMutex.unlock();
 }
 

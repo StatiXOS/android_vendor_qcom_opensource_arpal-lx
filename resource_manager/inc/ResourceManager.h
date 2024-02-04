@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2019-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -28,7 +28,7 @@
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  * Changes from Qualcomm Innovation Center are provided under the following license:
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted (subject to the limitations in the
@@ -87,12 +87,14 @@
 #include "ACDPlatformInfo.h"
 #include "ContextManager.h"
 #include "SignalHandler.h"
+#include <fstream>
 
 typedef enum {
     RX_HOSTLESS = 1,
     TX_HOSTLESS,
 } hostless_dir_t;
 
+#define ARRAX_SOC_ID 585
 #define audio_mixer mixer
 #define MAX_SND_CARD 10
 #define DUMMY_SND_CARD MAX_SND_CARD
@@ -479,9 +481,9 @@ protected:
     std::vector <std::pair<std::shared_ptr<Device>, Stream*>> active_devices;
     std::vector <std::shared_ptr<Device>> plugin_devices_;
     std::vector <pal_device_id_t> avail_devices_;
-    std::map<Stream*, uint32_t> mActiveStreamUserCounter;
+    std::map<Stream*, std::pair<uint32_t, bool>> mActiveStreamUserCounter;
     bool bOverwriteFlag;
-    bool screen_state_;
+    bool screen_state_ = true;
     bool charging_state_;
     bool is_charger_online_;
     bool is_concurrent_boost_state_;
@@ -491,6 +493,7 @@ protected:
     static std::mutex mResourceManagerMutex;
     static std::mutex mGraphMutex;
     static std::mutex mActiveStreamMutex;
+    static std::mutex mValidStreamMutex;
     static std::mutex mSleepMonitorMutex;
     static std::mutex mListFrontEndsMutex;
     static int snd_virt_card;
@@ -532,6 +535,8 @@ protected:
     static std::map<std::string, int> spkrPosTable;
     static std::map<int, std::string> spkrTempCtrlsMap;
     static std::map<uint32_t, uint32_t> btSlimClockSrcMap;
+    static std::map<std::string, int> handsetPosTable;
+    static std::map<pal_device_id_t, std::vector<std::string>> deviceTempCtrlsMap;
     static std::vector<deviceIn> deviceInfo;
     static std::vector<tx_ecinfo> txEcInfo;
     static struct vsid_info vsidInfo;
@@ -578,9 +583,14 @@ public:
     static bool mixerClosed;
     enum card_status_t cardState;
     bool ssrStarted = false;
+    /* Variable to cache a2dp suspended state for a2dp device */
+    static bool a2dp_suspended;
+    //Variable to check if multiple sampe rate during combo device supported
+    bool is_multiple_sample_rate_combo_supported = true;
     /* Variable to store whether Speaker protection is enabled or not */
     static bool isSpeakerProtectionEnabled;
     static bool isHandsetProtectionEnabled;
+    static bool isSpeakerHandsetProtectionSeparate;
     static bool isChargeConcurrencyEnabled;
     static bool isCpsEnabled;
     static bool isVbatEnabled;
@@ -649,7 +659,8 @@ public:
     int deregisterStream(Stream *s);
     int isActiveStream(pal_stream_handle_t *handle);
     int initStreamUserCounter(Stream *s);
-    int deinitStreamUserCounter(Stream *s);
+    int deactivateStreamUserCounter(Stream *s);
+    int eraseStreamUserCounter(Stream *s);
     int increaseStreamUserCounter(Stream* s);
     int decreaseStreamUserCounter(Stream* s);
     int getStreamUserCounter(Stream *s);
@@ -688,6 +699,7 @@ public:
     static std::string getBtCodecLib(uint32_t codecFormat, std::string codecType);
     static void updateSpkrTempCtrls(int key, std::string value);
     static std::string getSpkrTempCtrl(int channel);
+    static std::vector<std::string> getDeviceTempCtrl(pal_device_id_t pal_device_id);
     static void updateBtSlimClockSrcMap(uint32_t key, uint32_t value);
     static uint32_t getBtSlimClockSrc(uint32_t codecFormat);
     int getGainLevelMapping(struct pal_amp_db_and_gain_table *mapTbl, int tblSize);
@@ -743,6 +755,8 @@ public:
     bool updateDeviceConfig(std::shared_ptr<Device> *inDev,
              struct pal_device *inDevAttr, const pal_stream_attributes* inStrAttr);
     int32_t forceDeviceSwitch(std::shared_ptr<Device> inDev, struct pal_device *newDevAttr);
+    int32_t forceDeviceSwitch(std::shared_ptr<Device> inDev, struct pal_device *newDevAttr,
+                              std::vector <Stream *> prevActiveStreams);
     const std::string getPALDeviceName(const pal_device_id_t id) const;
     bool isNonALSACodec(const struct pal_device *device) const;
     bool isNLPISwitchSupported(pal_stream_type_t type);
@@ -790,7 +804,7 @@ public:
     bool isAnyVUIStreamBuffering();
     void handleDeferredSwitch();
     void handleConcurrentStreamSwitch(std::vector<pal_stream_type_t>& st_streams,
-                                      bool stream_active, bool is_deferred);
+                                      bool stream_active);
     std::shared_ptr<Device> getActiveEchoReferenceRxDevices(Stream *tx_str);
     std::shared_ptr<Device> getActiveEchoReferenceRxDevices_l(Stream *tx_str);
     std::vector<Stream*> getConcurrentTxStream(
@@ -802,6 +816,7 @@ public:
     bool isExternalECSupported(std::shared_ptr<Device> tx_dev);
     bool isExternalECRefEnabled(int rx_dev_id);
     void disableInternalECRefs(Stream *s);
+    bool checkStreamMatch(Stream *target, Stream *ref);
 
     static void endTag(void *userdata __unused, const XML_Char *tag_name);
     static void snd_reset_data_buf(struct xml_userdata *data);
@@ -817,6 +832,7 @@ public:
     static void process_gain_db_to_level_map(struct xml_userdata *data, const XML_Char **attr);
     static void processCardInfo(struct xml_userdata *data, const XML_Char *tag_name);
     static void processSpkrTempCtrls(const XML_Char **attr);
+    static void processDeviceTempCtrls(const XML_Char **attr, const int attr_count);
     static void processBTCodecInfo(const XML_Char **attr, const int attr_count);
     static void startTag(void *userdata __unused, const XML_Char *tag_name, const XML_Char **attr);
     static void snd_data_handler(void *userdata, const XML_Char *s, int len);
@@ -865,6 +881,10 @@ public:
     void unlockGraph() { mGraphMutex.unlock(); };
     void lockActiveStream() { mActiveStreamMutex.lock(); };
     void unlockActiveStream() { mActiveStreamMutex.unlock(); };
+    void lockValidStreamMutex() { mValidStreamMutex.lock(); };
+    void unlockValidStreamMutex() { mValidStreamMutex.unlock(); };
+    void lockResourceManagerMutex() {mResourceManagerMutex.lock();};
+    void unlockResourceManagerMutex() {mResourceManagerMutex.unlock();};
     void getSharedBEActiveStreamDevs(std::vector <std::tuple<Stream *, uint32_t>> &activeStreamDevs,
                                      int dev_id);
     int32_t streamDevSwitch(std::vector <std::tuple<Stream *, uint32_t>> streamDevDisconnectList,
@@ -899,6 +919,7 @@ public:
                                  struct pal_device *Dev2Attr,
                                  const struct pal_device_info *Dev2Info);
     int32_t voteSleepMonitor(Stream *str, bool vote, bool force_nlpi_vote = false);
+    bool checkAndUpdateDeferSwitchState(bool stream_active);
     static uint32_t palFormatToBitwidthLookup(const pal_audio_fmt_t format);
     void chargerListenerFeatureInit();
     static void chargerListenerInit(charger_status_change_fn_t);
@@ -912,11 +933,37 @@ public:
                                  std::vector<Stream*> &streamsToSwitch,
                                  struct pal_device *streamDevAttr,
                                  bool streamEnable);
+    void checkSpeakerConcurrency(struct pal_device *deviceattr,
+                             const struct pal_stream_attributes *sAttr,
+                             std::vector<Stream*> &streamsToSwitch,
+                             struct pal_device *streamDevAttr);
+
     void checkHapticsConcurrency(struct pal_device *deviceattr,
                              const struct pal_stream_attributes *sAttr,
                              std::vector<Stream*> &streamsToSwitch,
                              struct pal_device *streamDevAttr);
     static void sendCrashSignal(int signal, pid_t pid, uid_t uid);
 };
+
+static int getSocId() {
+    std::ifstream fd;
+    std::string strData;
+    int soc_id = -1;
+    std::string socbuf = "/sys/devices/soc0/soc_id";
+    fd.open(socbuf, std::ios::in);
+    if (!fd.is_open()) {
+        PAL_ERR(LOG_TAG, "Unable to open file");
+        return -1;
+    }
+
+    getline(fd, strData);
+    if (strData.length() != 0) {
+        soc_id = stoi(strData);
+    } else {
+        PAL_ERR(LOG_TAG, "id is null");
+    }
+    fd.close();
+    return soc_id;
+}
 
 #endif

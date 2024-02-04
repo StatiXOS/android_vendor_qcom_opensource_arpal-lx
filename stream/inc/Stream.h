@@ -220,7 +220,9 @@ public:
     uint32_t getLatency();
     int32_t getAssociatedDevices(std::vector <std::shared_ptr<Device>> &adevices);
     int32_t getAssociatedPalDevices(std::vector <struct pal_device> &palDevices);
-    int32_t updatePalDevice(struct pal_device *dattr, pal_device_id_t dev_id, bool replace = true);
+    void clearOutPalDevices();
+    void addPalDevice(struct pal_device *dattr) { mPalDevice.push_back(*dattr); }
+    int32_t updatePalDevice(struct pal_device *dattr, pal_device_id_t dev_id);
     int32_t getSoundCardId();
     int32_t getAssociatedSession(Session** session);
     int32_t setBufInfo(pal_buffer_config *in_buffer_config,
@@ -279,6 +281,7 @@ public:
         mStreamMutex.unlock();
     };
     bool isMutexLockedbyRm() { return mutexLockedbyRm; }
+    void setCachedState(stream_state_t state);
 };
 
 class StreamNonTunnel : public Stream

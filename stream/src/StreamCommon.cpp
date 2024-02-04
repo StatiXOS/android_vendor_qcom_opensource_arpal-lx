@@ -251,7 +251,6 @@ int32_t  StreamCommon::close()
     }
     PAL_VERBOSE(LOG_TAG, "closed the devices successfully");
     currentState = STREAM_IDLE;
-    cachedState = currentState;
     mStreamMutex.unlock();
 
     PAL_DBG(LOG_TAG, "Exit. closed the stream successfully %d status %d",
@@ -299,8 +298,7 @@ int32_t StreamCommon::start()
         rm->lockActiveStream();
         mStreamMutex.lock();
         for (int i = 0; i < mDevices.size(); i++) {
-            if (!rm->isDeviceActive_l(mDevices[i], this))
-                rm->registerDevice(mDevices[i], this);
+            rm->registerDevice(mDevices[i], this);
         }
         rm->unlockActiveStream();
     } else if (currentState == STREAM_STARTED) {
@@ -381,8 +379,7 @@ int32_t StreamCommon::stop()
         mStreamMutex.lock();
         currentState = STREAM_STOPPED;
         for (int i = 0; i < mDevices.size(); i++) {
-            if (rm->isDeviceActive_l(mDevices[i], this))
-                rm->deregisterDevice(mDevices[i], this);
+            rm->deregisterDevice(mDevices[i], this);
         }
         rm->unlockActiveStream();
         PAL_VERBOSE(LOG_TAG, "In %s, device count - %zu",
@@ -410,7 +407,6 @@ int32_t StreamCommon::stop()
         PAL_ERR(LOG_TAG, "Error:Stream should be in start/pause state, %d", currentState);
         status = -EINVAL;
     }
-    cachedState = currentState;
     PAL_DBG(LOG_TAG, "Exit. status %d, state %d", status, currentState);
 
     mStreamMutex.unlock();
@@ -507,7 +503,7 @@ exit:
 
 int32_t StreamCommon::ssrDownHandler()
 {
-    int status = 0;
+    int32_t status = 0;
 
     mStreamMutex.lock();
     /* Updating cached state here only if it's STREAM_IDLE,
@@ -556,7 +552,7 @@ exit :
 
 int32_t StreamCommon::ssrUpHandler()
 {
-    int status = 0;
+    int32_t status = 0;
 
     mStreamMutex.lock();
     PAL_DBG(LOG_TAG, "Enter. session handle - %pK state %d",

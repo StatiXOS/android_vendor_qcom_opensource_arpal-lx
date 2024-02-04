@@ -25,6 +25,10 @@
  * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
  * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ * Changes from Qualcomm Innovation Center are provided under the following license:
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
 /** \file pal_defs.h
@@ -130,6 +134,16 @@ static const std::map<std::string, pal_audio_fmt_t> PalAudioFormatMap
 
 };
 #endif
+
+struct aac_enc_cfg {
+    uint16_t aac_enc_mode; /**< AAC encoder mode */
+    uint16_t aac_fmt_flag; /**< AAC format flag */
+};
+
+struct pal_snd_enc_aac {
+    uint32_t aac_bit_rate;
+    struct aac_enc_cfg enc_cfg;
+};
 
 struct pal_snd_dec_aac {
     uint16_t audio_obj_type;
@@ -249,6 +263,10 @@ typedef union {
     struct pal_snd_dec_vorbis vorbis_dec;
 } pal_snd_dec_t;
 
+/** Audio encoder parameter data*/
+typedef union {
+    struct pal_snd_enc_aac aac_enc;
+} pal_snd_enc_t;
 
 /** Audio parameter data*/
 typedef struct pal_param_payload_s {
@@ -404,8 +422,9 @@ typedef enum {
     PAL_DEVICE_IN_TELEPHONY_RX = PAL_DEVICE_IN_MIN + 18,
     PAL_DEVICE_IN_ULTRASOUND_MIC = PAL_DEVICE_IN_MIN +19,
     PAL_DEVICE_IN_EXT_EC_REF = PAL_DEVICE_IN_MIN + 20,
+    PAL_DEVICE_IN_ECHO_REF = PAL_DEVICE_IN_MIN + 21,
     // Add new IN devices here, increment MAX and MIN below when you do so
-    PAL_DEVICE_IN_MAX = PAL_DEVICE_IN_MIN + 21,
+    PAL_DEVICE_IN_MAX = PAL_DEVICE_IN_MIN + 22,
 } pal_device_id_t;
 
 typedef enum {
@@ -474,6 +493,9 @@ static const std::map<std::string, pal_device_id_t> deviceIdLUT {
     {std::string{ "PAL_DEVICE_IN_TELEPHONY_RX" },          PAL_DEVICE_IN_TELEPHONY_RX},
     {std::string{ "PAL_DEVICE_IN_ULTRASOUND_MIC" },        PAL_DEVICE_IN_ULTRASOUND_MIC},
     {std::string{ "PAL_DEVICE_IN_EXT_EC_REF" },            PAL_DEVICE_IN_EXT_EC_REF},
+#ifdef EC_REF_CAPTURE_ENABLED
+    {std::string{ "PAL_DEVICE_IN_ECHO_REF" },              PAL_DEVICE_IN_ECHO_REF},
+#endif
 };
 
 //reverse mapping
@@ -519,7 +541,10 @@ static const std::map<uint32_t, std::string> deviceNameLUT {
     {PAL_DEVICE_IN_VI_FEEDBACK,           std::string{"PAL_DEVICE_IN_VI_FEEDBACK"}},
     {PAL_DEVICE_IN_TELEPHONY_RX,          std::string{"PAL_DEVICE_IN_TELEPHONY_RX"}},
     {PAL_DEVICE_IN_ULTRASOUND_MIC,        std::string{"PAL_DEVICE_IN_ULTRASOUND_MIC"}},
-    {PAL_DEVICE_IN_EXT_EC_REF,            std::string{"PAL_DEVICE_IN_EXT_EC_REF"}}
+    {PAL_DEVICE_IN_EXT_EC_REF,            std::string{"PAL_DEVICE_IN_EXT_EC_REF"}},
+#ifdef EC_REF_CAPTURE_ENABLED
+    {PAL_DEVICE_IN_ECHO_REF,              std::string{"PAL_DEVICE_IN_ECHO_REF"}},
+#endif
 };
 
 const std::map<std::string, uint32_t> usecaseIdLUT {
@@ -663,11 +688,15 @@ struct pal_media_config {
 };
 
 /** Android Media configuraiton  */
+/* dynamic media config for plugin devices, +1 so that the last entry is always 0 */
+#define MAX_SUPPORTED_CHANNEL_MASKS (2 * 8)
+#define MAX_SUPPORTED_FORMATS 15
+#define MAX_SUPPORTED_SAMPLE_RATES 7
 typedef struct dynamic_media_config {
-    uint32_t sample_rate;                /**< sample rate */
-    uint32_t format;                     /**< format */
-    uint32_t mask;                       /**< channel mask */
-    bool jack_status;                    /**< input/output jack status*/
+    uint32_t sample_rate[MAX_SUPPORTED_SAMPLE_RATES+1];   /**< sample rate */
+    uint32_t format[MAX_SUPPORTED_FORMATS+1];             /**< format */
+    uint32_t mask[MAX_SUPPORTED_CHANNEL_MASKS + 1];       /**< channel mask */
+    bool jack_status;                                     /**< input/output jack status*/
 } dynamic_media_config_t;
 
 /**  Available stream flags of an audio session*/
@@ -693,6 +722,7 @@ struct pal_stream_attributes {
     pal_stream_direction_t direction;            /**<  direction of the streams */
     struct pal_media_config in_media_config;     /**<  media config of the input audio samples */
     struct pal_media_config out_media_config;    /**<  media config of the output audio samples */
+    bool isComboHeadsetActive;
 };
 
 /**< Key value pair to identify the topology of a usecase from default  */

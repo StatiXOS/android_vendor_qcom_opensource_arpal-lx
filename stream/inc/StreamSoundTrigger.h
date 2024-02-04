@@ -182,6 +182,14 @@ class StreamSoundTrigger : public Stream {
     bool IsStreamInBuffering() {
        return capture_requested_ && (GetCurrentStateId() == ST_STATE_BUFFERING);
     }
+
+    void *GetGSLEngine() {
+        if (gsl_engine_)
+            return (void *)gsl_engine_.get();
+        else
+            return nullptr;
+    }
+
  private:
     class EngineCfg {
      public:
@@ -552,8 +560,8 @@ class StreamSoundTrigger : public Stream {
     SoundModelInfo* sm_info_;
     std::vector<std::shared_ptr<EngineCfg>> engines_;
     std::shared_ptr<SoundTriggerEngine> gsl_engine_;
-
     pal_st_sound_model_type_t sound_model_type_;
+    std::shared_ptr<Device> ec_rx_dev_;
     struct pal_st_phrase_sound_model *sm_config_;
     struct pal_st_recognition_config *rec_config_;
     uint32_t recognition_mode_;

@@ -26,7 +26,7 @@
  * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted (subject to the limitations in the
@@ -397,7 +397,7 @@ SoundTriggerPlatformInfo::SoundTriggerPlatformInfo() :
     transit_to_non_lpi_on_charging_(false),
     dedicated_sva_path_(true),
     dedicated_headset_path_(false),
-    lpi_enable_(true),
+    lpi_enable_(false),
     enable_debug_dumps_(false),
     non_lpi_without_ec_(false),
     concurrent_capture_(false),
@@ -406,6 +406,7 @@ SoundTriggerPlatformInfo::SoundTriggerPlatformInfo() :
     low_latency_bargein_enable_(false),
     mmap_enable_(false),
     notify_second_stage_failure_(false),
+    support_defer_lpi_switch_(true),
     mmap_buffer_duration_(0),
     mmap_frame_length_(0),
     sound_model_lib_("liblistensoundmodel2vendor.so"),
@@ -545,6 +546,9 @@ void SoundTriggerPlatformInfo::HandleStartTag(const char* tag,
                 sound_model_lib_ = std::string(attribs[++i]);
             } else if (!strcmp(attribs[i], "notify_second_stage_failure")) {
                 notify_second_stage_failure_ =
+                    !strncasecmp(attribs[++i], "true", 4) ? true : false;
+            } else if (!strcmp(attribs[i], "support_defer_lpi_switch")) {
+                 support_defer_lpi_switch_ =
                     !strncasecmp(attribs[++i], "true", 4) ? true : false;
             } else {
                 PAL_INFO(LOG_TAG, "Invalid attribute %s", attribs[i++]);

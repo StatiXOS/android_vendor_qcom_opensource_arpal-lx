@@ -26,6 +26,40 @@
  * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
  * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ * Changes from Qualcomm Innovation Center are provided under the following license:
+ *
+ * Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted (subject to the limitations in the
+ * disclaimer below) provided that the following conditions are met:
+ *
+ *   * Redistributions of source code must retain the above copyright
+ *     notice, this list of conditions and the following disclaimer.
+ *
+ *   * Redistributions in binary form must reproduce the above
+ *     copyright notice, this list of conditions and the following
+ *     disclaimer in the documentation and/or other materials provided
+ *     with the distribution.
+ *
+ *   * Neither the name of Qualcomm Innovation Center, Inc. nor the names of its
+ *     contributors may be used to endorse or promote products derived
+ *     from this software without specific prior written permission.
+ *
+ * NO EXPRESS OR IMPLIED LICENSES TO ANY PARTY'S PATENT RIGHTS ARE
+ * GRANTED BY THIS LICENSE. THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT
+ * HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED
+ * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+ * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE
+ * GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER
+ * IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
+ * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #define LOG_TAG "PAL: SessionAlsaPcm"
@@ -167,19 +201,19 @@ int SessionAlsaPcm::open(Stream * s)
             else if ((sAttr.type == PAL_STREAM_PCM_OFFLOAD) ||
                      (sAttr.type == PAL_STREAM_DEEP_BUFFER) ||
                      (sAttr.type == PAL_STREAM_LOW_LATENCY)) {
-                     // Register for SoftPause callback for
+                     // Register for Mixer Event callback for
                      // only playback related streams
                      status = rm->registerMixerEventCallback(pcmDevIds,
                          sessionCb, cbCookie, true);
-                     if (status != 0) {
+                     if (status == 0) {
+                         isMixerEventCbRegd = true;
+                     } else {
+                         // Not a fatal error
                          PAL_ERR(LOG_TAG, "Failed to register callback to rm");
                          // If registration fails for this then pop noise
                          // issue will come. It isn't fatal so not throwing error.
                          status = 0;
-                         isPauseRegistrationDone = false;
                      }
-                     else
-                         isPauseRegistrationDone = true;
             }
             break;
         case PAL_AUDIO_INPUT | PAL_AUDIO_OUTPUT:
@@ -415,9 +449,11 @@ int SessionAlsaPcm::setConfig(Stream * s, configType type, int tag)
     const char *setParamTagControl = "setParamTag";
     const char *stream = "PCM";
     const char *setCalibrationControl = "setCalibration";
+    const char *setBEControl = "control";
     struct mixer_ctl *ctl;
     std::ostringstream tagCntrlName;
     std::ostringstream calCntrlName;
+    std::ostringstream beCntrlName;
     pal_stream_attributes sAttr;
     int tag_config_size = 0;
     int cal_config_size = 0;
@@ -427,6 +463,33 @@ int SessionAlsaPcm::setConfig(Stream * s, configType type, int tag)
         PAL_ERR(LOG_TAG, "stream get attributes failed");
         return status;
     }
+
+    if (sAttr.type != PAL_STREAM_VOICE_CALL_RECORD &&
+        sAttr.type != PAL_STREAM_VOICE_CALL_MUSIC  &&
+        sAttr.type != PAL_STREAM_CONTEXT_PROXY) {
+        if ((sAttr.direction == PAL_AUDIO_OUTPUT && rxAifBackEnds.empty()) ||
+            (sAttr.direction == PAL_AUDIO_INPUT && txAifBackEnds.empty())) {
+            PAL_ERR(LOG_TAG, "No backend connected to this stream\n");
+            return -EINVAL;
+        }
+
+        if (PAL_STREAM_LOOPBACK == sAttr.type) {
+            if (pcmDevRxIds.size() > 0)
+                beCntrlName << stream << pcmDevRxIds.at(0) << " " << setBEControl;
+        } else {
+            if (pcmDevIds.size() > 0)
+                beCntrlName << stream << pcmDevIds.at(0) << " " << setBEControl;
+        }
+
+        ctl = mixer_get_ctl_by_name(mixer, beCntrlName.str().data());
+        if (!ctl) {
+            PAL_ERR(LOG_TAG, "Invalid mixer control: %s\n", beCntrlName.str().data());
+            return -ENOENT;
+        }
+        mixer_ctl_set_enum_by_string(ctl, (sAttr.direction == PAL_AUDIO_INPUT) ?
+                                     txAifBackEnds[0].second.data() : rxAifBackEnds[0].second.data());
+    }
+
     PAL_DBG(LOG_TAG, "Enter tag: %d", tag);
     switch (type) {
         case MODULE:
@@ -560,6 +623,7 @@ int SessionAlsaPcm::setTKV(Stream * s, configType type, effect_pal_payload_t *ef
     std::ostringstream tagCntrlName;
     int tkv_size = 0;
     pal_stream_attributes sAttr;
+    uint32_t miid = 0;
 
     status = s->getStreamAttributes(&sAttr);
     if (status != 0) {
@@ -591,6 +655,31 @@ int SessionAlsaPcm::setTKV(Stream * s, configType type, effect_pal_payload_t *ef
             }
 
             tagsent = effectPayload->tag;
+            // check if tag present with current usecase
+            status = -EINVAL;
+            if (sAttr.direction == PAL_AUDIO_OUTPUT) {
+                if (pcmDevIds.size() && rxAifBackEnds.size())
+                    status = SessionAlsaUtils::getModuleInstanceId(mixer,
+                        pcmDevIds.at(0), rxAifBackEnds[0].second.data(), tagsent, &miid);
+            } else if (sAttr.direction == PAL_AUDIO_INPUT) {
+                if (pcmDevIds.size() && txAifBackEnds.size())
+                    status = SessionAlsaUtils::getModuleInstanceId(mixer,
+                        pcmDevIds.at(0), txAifBackEnds[0].second.data(), tagsent, &miid);
+            } else if (sAttr.direction == (PAL_AUDIO_INPUT | PAL_AUDIO_OUTPUT)) {
+                if (pcmDevRxIds.size() && rxAifBackEnds.size()) {
+                    status = SessionAlsaUtils::getModuleInstanceId(mixer, pcmDevRxIds.at(0),
+                            rxAifBackEnds[0].second.data(), tagsent, &miid);
+                    if (status) {
+                        if (pcmDevTxIds.size() && txAifBackEnds.size())
+                            status = SessionAlsaUtils::getModuleInstanceId(mixer,
+                                pcmDevTxIds.at(0), txAifBackEnds[0].second.data(), tagsent, &miid);
+                    }
+                }
+            }
+            if (0 != status) {
+                PAL_ERR(LOG_TAG, "Tag 0x%x not prsent in current usecase, skip tkv set", tagsent);
+                goto exit;
+            }
             status = SessionAlsaUtils::getTagMetadata(tagsent, tkv, tagConfig);
             if (0 != status) {
                 goto exit;
@@ -1082,7 +1171,41 @@ set_mixer:
             } else if (sAttr.type == PAL_STREAM_VOICE_UI || (sAttr.type == PAL_STREAM_ACD)) {
                 SessionAlsaUtils::setMixerParameter(mixer,
                     pcmDevIds.at(0), customPayload, customPayloadSize);
-                freeCustomPayload();            }
+                freeCustomPayload();
+            } else if (sAttr.type == PAL_STREAM_ULTRA_LOW_LATENCY) {
+                       status = SessionAlsaUtils::getModuleInstanceId(mixer, pcmDevIds.at(0),
+                                                   txAifBackEnds[0].second.data(),
+                                                   TAG_STREAM_MFC_SR, &miid);
+                       if (status != 0) {
+                           PAL_ERR(LOG_TAG, "getModuleInstanceId failed\n");
+                           goto exit;
+                       }
+                       PAL_DBG(LOG_TAG, "ULL record, miid : %x id = %d\n", miid, pcmDevIds.at(0));
+                       if (isPalPCMFormat(sAttr.in_media_config.aud_fmt_id))
+                           streamData.bitWidth = ResourceManager::palFormatToBitwidthLookup(sAttr.in_media_config.aud_fmt_id);
+                       else
+                           streamData.bitWidth = sAttr.in_media_config.bit_width;
+                       streamData.sampleRate = sAttr.in_media_config.sample_rate;
+                       streamData.numChannel = sAttr.in_media_config.ch_info.channels;
+                       streamData.rotation_type = PAL_SPEAKER_ROTATION_LR;
+                       streamData.ch_info = nullptr;
+                       builder->payloadMFCConfig(&payload, &payloadSize, miid, &streamData);
+                       if (payloadSize && payload) {
+                           status = updateCustomPayload(payload, payloadSize);
+                           freeCustomPayload(&payload, &payloadSize);
+                           if (0 != status) {
+                               PAL_ERR(LOG_TAG, "updateCustomPayload Failed\n");
+                               goto exit;
+                           }
+                       }
+                       status = SessionAlsaUtils::setMixerParameter(mixer, pcmDevIds.at(0),
+                                                        customPayload, customPayloadSize);
+                       freeCustomPayload();
+                       if (status != 0) {
+                           PAL_ERR(LOG_TAG, "setMixerParameter failed");
+                           goto exit;
+                       }
+            }
             if (ResourceManager::isLpiLoggingEnabled()) {
                 PAL_INFO(LOG_TAG, "LPI data logging Param ON");
                 /* No error check as TAG/TKV may not required for non LPI usecases */
@@ -1159,7 +1282,7 @@ pcm_start:
                 }
             }
 
-            if (!status && isPauseRegistrationDone) {
+            if (!status && isMixerEventCbRegd && !isPauseRegistrationDone) {
                 // Stream supports Soft Pause and registration with RM is
                 // successful. So register for Soft pause callback from adsp.
                 payload_size = sizeof(struct agm_event_reg_cfg);
@@ -1177,12 +1300,14 @@ pcm_start:
                 status = SessionAlsaUtils::registerMixerEvent(mixer, pcmDevIds.at(0),
                             rxAifBackEnds[0].second.data(), TAG_PAUSE, (void *)&event_cfg,
                             payload_size);
-                if (status != 0) {
+                if (status == 0) {
+                    isPauseRegistrationDone = true;
+                } else {
+                    // Not a fatal error
                     PAL_ERR(LOG_TAG, "Register for Pause failed %d", status);
                     // If registration fails for this then pop issue will come.
                     // It isn't fatal so not throwing error.
                     status = 0;
-                    isPauseRegistrationDone = false;
                 }
             }
             break;
@@ -1325,11 +1450,22 @@ int SessionAlsaPcm::stop(Stream * s)
                 event_cfg.event_id = EVENT_ID_SOFT_PAUSE_PAUSE_COMPLETE;
                 event_cfg.event_config_payload_size = 0;
                 event_cfg.is_register = 0;
-                if (pcmDevIds.size() > 0)
-                    SessionAlsaUtils::registerMixerEvent(mixer, pcmDevIds.at(0),
-                            rxAifBackEnds[0].second.data(), TAG_PAUSE, (void *)&event_cfg,
-                            payload_size);
-                isPauseRegistrationDone = false;
+
+                if (!pcmDevIds.size()) {
+                    PAL_ERR(LOG_TAG, "frontendIDs are not available");
+                    status = -EINVAL;
+                    goto exit;
+                }
+                status = SessionAlsaUtils::registerMixerEvent(mixer, pcmDevIds.at(0),
+                        rxAifBackEnds[0].second.data(), TAG_PAUSE, (void *)&event_cfg,
+                        payload_size);
+                if (status == 0) {
+                    isPauseRegistrationDone = false;
+                } else {
+                    // Not a fatal error
+                    PAL_ERR(LOG_TAG, "Pause deregistration failed");
+                    status = 0;
+               }
             }
             break;
         case PAL_AUDIO_INPUT | PAL_AUDIO_OUTPUT:
@@ -1523,15 +1659,17 @@ int SessionAlsaPcm::close(Stream * s)
                 status = errno;
                 PAL_ERR(LOG_TAG, "pcm_close failed %d", status);
             }
-            // Deregister callback for Soft Pause
-            if (!status && isPauseRegistrationDone) {
+            // Deregister callback for Mixer Event
+            if (!status && isMixerEventCbRegd) {
                 status = rm->registerMixerEventCallback(pcmDevIds,
                     sessionCb, cbCookie, false);
-                if (status != 0) {
-                    PAL_DBG(LOG_TAG, "Failed to deregister callback to rm");
+                if (status == 0) {
+                    isMixerEventCbRegd = false;
+                } else {
+                    // Not a fatal error
+                    PAL_ERR(LOG_TAG, "Failed to deregister callback to rm");
                     status = 0;
                 }
-                isPauseRegistrationDone = false;
             }
             rm->freeFrontEndIds(pcmDevIds, sAttr, 0);
             pcm = NULL;
@@ -1827,15 +1965,8 @@ int SessionAlsaPcm::write(Stream *s, int tag, struct pal_buffer *buf, int * size
         data = buf->buffer;
         data = static_cast<char *>(data) + offset;
         sizeWritten = out_buf_size;  //initialize 0
-        if (pcm && (mState == SESSION_FLUSHED)) {
-            status = pcm_start(pcm);
-            if (status) {
-                status = errno;
-                PAL_ERR(LOG_TAG, "pcm_start failed %d", status);
-                goto exit;
-            }
-            mState = SESSION_STARTED;
-        } else if (!pcm) {
+
+        if (!pcm) {
             PAL_ERR(LOG_TAG, "pcm is NULL");
             status = -EINVAL;
             goto exit;
@@ -1864,15 +1995,8 @@ int SessionAlsaPcm::write(Stream *s, int tag, struct pal_buffer *buf, int * size
     offset = bytesWritten + buf->offset;
     sizeWritten = bytesRemaining;
     data = buf->buffer;
-    if (pcm && (mState == SESSION_FLUSHED)) {
-        status = pcm_start(pcm);
-        if (status) {
-            status = errno;
-            PAL_ERR(LOG_TAG, "pcm_start failed %d", status);
-            goto exit;
-        }
-        mState = SESSION_STARTED;
-    } else if (!pcm) {
+
+    if (!pcm) {
         PAL_ERR(LOG_TAG, "pcm is NULL");
         status = -EINVAL;
         goto exit;
@@ -2155,7 +2279,12 @@ int SessionAlsaPcm::setParameters(Stream *streamHandle, int tagId, uint32_t para
                 goto exit;
             }
 
-            builder->payloadVolumeConfig(&paramData, &paramSize, miid, vdata);
+            if (vdata->no_of_volpair == 2 && sAttr.out_media_config.ch_info.channels == 2) {
+                builder->payloadMultichVolumemConfig(&paramData, &paramSize, miid, vdata);
+            } else {
+                builder->payloadVolumeConfig(&paramData, &paramSize, miid, vdata);
+            }
+
             if (paramSize) {
                 status = SessionAlsaUtils::setMixerParameter(mixer, device,
                                                paramData, paramSize);
@@ -2494,7 +2623,11 @@ int SessionAlsaPcm::getParameters(Stream *s __unused, int tagId, uint32_t param_
 
 
 exit:
-    freeCustomPayload(&payloadData, &payloadSize);
+    if (payloadSize) {
+        delete [] payloadData;
+        payloadData = NULL;
+        payloadSize = 0;
+    }
     PAL_DBG(LOG_TAG, "Exit. status %d", status);
     return status;
 }
@@ -2540,23 +2673,16 @@ int SessionAlsaPcm::drain(pal_drain_type_t type __unused)
 int SessionAlsaPcm::flush()
 {
     int status = 0;
+    PAL_VERBOSE(LOG_TAG, "Enter flush");
 
-    if (!pcm) {
-        PAL_ERR(LOG_TAG, "Pcm is invalid");
+    if (pcmDevIds.size() > 0) {
+        status = SessionAlsaUtils::flush(rm, pcmDevIds.at(0));
+    } else {
+        PAL_ERR(LOG_TAG, "DevIds size is invalid");
         return -EINVAL;
     }
-    PAL_VERBOSE(LOG_TAG, "Enter flush\n");
-    if (pcm && isActive()) {
-        status = pcm_stop(pcm);
 
-        if (!status)
-            mState = SESSION_FLUSHED;
-        else
-            status = errno;
-    }
-
-    PAL_VERBOSE(LOG_TAG, "status %d\n", status);
-
+    PAL_VERBOSE(LOG_TAG, "Exit status: %d", status);
     return status;
 }
 
